@@ -1,4 +1,4 @@
-# Weather Agent - Google ADK with MCP Server
+# Weather Agent - Google ADK with OpenRouter and MCP Server
 
 AI agent built with **Google Agent Development Kit (ADK)** that uses tools from a local **MCP server** via Streamable HTTP transport.
 
@@ -26,7 +26,7 @@ AI agent built with **Google Agent Development Kit (ADK)** that uses tools from 
 
 ## Features
 
-- **Remote MCP Tools**: Connects to MCP server via Streamable HTTP
+- **Local MCP Tools**: Connects to the Weather MCP server via Streamable HTTP
 - **3 Weather Tools**:
   - `get_current_weather(city)` - Real-time weather conditions
   - `get_forecast(city, days)` - Weather forecast up to 3 days
@@ -36,22 +36,18 @@ AI agent built with **Google Agent Development Kit (ADK)** that uses tools from 
 
 ## Quick Start
 
-### 1. Start the MCP Server
+### 1. Configure the repository environment
 
 ```bash
-cd ../mcp-server
-export WEATHERAPI_KEY="your_weatherapi_key"
-uv run python weather.py
+cd ../..
+copy .env.example .env
+# Fill in OPENROUTER_API_KEY and WEATHERAPI_KEY in the root .env
 ```
 
-### 2. Setup Environment
+### 2. Start the MCP Server
 
 ```bash
-cd mcp-client
-
-# Create .env file with your Google API key
-# Get free key from: https://aistudio.google.com/apikey
-echo "GOOGLE_API_KEY=your_google_api_key_here" > .env
+python 04-lab/mcp-server/weather.py
 ```
 
 ### 3. Install Dependencies
@@ -60,20 +56,25 @@ echo "GOOGLE_API_KEY=your_google_api_key_here" > .env
 uv sync
 ```
 
-### 4. Run the Agent
+### 4. Verify the Gate 5 flow
+
+```bash
+python 04-lab/mcp-client/verify_gate5_e2e.py
+```
+
+### 5. Run the Agent
 
 ```bash
 uv run adk web
 ```
 
-### 5. Use the Agent
+### 6. Use the Agent
 
 1. Open browser: http://localhost:8000
 2. Select `weather_agent` from dropdown
 3. Ask questions like:
-   - "What's the weather in Brisbane?"
-   - "Give me a 3-day forecast for Tokyo"
-   - "How's the weather in New York?"
+   - "Thời tiết hiện tại ở Hà Nội thế nào?"
+   - "Cho tôi dự báo 2 ngày tới ở Hà Nội"
 
 ## Project Structure
 
@@ -94,7 +95,7 @@ mcp-client/
 In `weather_agent/agent.py`:
 
 ```python
-MCP_SERVER_URL = "http://localhost:8085/mcp"
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8085/mcp")
 
 connection_params = StreamableHTTPConnectionParams(
     url=MCP_SERVER_URL,
@@ -103,7 +104,7 @@ connection_params = StreamableHTTPConnectionParams(
 
 root_agent = Agent(
     name="weather_agent",
-    model="gemini-2.5-flash",
+    model=LiteLlm(model="openrouter/openai/gpt-4.1-mini"),
     tools=[weather_tools],
 )
 ```
@@ -123,16 +124,19 @@ root_agent = Agent(
 3. **Timeout errors**: Server not started
    - Start the MCP server first, then the ADK client
 
-### Fallback Mode
+### Configuration errors
 
-If MCP connection fails, the agent runs in fallback mode without tools.
-Fix the connection and restart ADK web.
+The agent fails fast when `OPENROUTER_API_KEY` is missing and does not fall back
+to a no-tool agent. Start the local MCP server before running the agent.
 
 ## Environment Variables
 
-Create `.env` file:
+Create the repository-root `.env` file:
 ```bash
-GOOGLE_API_KEY=your_gemini_api_key
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+OPENROUTER_MODEL=openai/gpt-4.1-mini
+WEATHERAPI_KEY=your_weatherapi_key_here
+MCP_SERVER_URL=http://127.0.0.1:8085/mcp
 ```
 
 ## Resources

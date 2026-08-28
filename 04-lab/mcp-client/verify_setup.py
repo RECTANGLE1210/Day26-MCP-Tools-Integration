@@ -1,156 +1,123 @@
-#!/usr/bin/env python3
-"""
-Verification script for Weather Agent setup
-Checks if all components are configured correctly
-"""
+"""Basic setup checks for the Gate 5 OpenRouter weather agent."""
+
+import asyncio
+import importlib
 import os
 import sys
 from pathlib import Path
 
-def check_environment():
-    """Check if .env file exists and is configured"""
-    print("🔍 Checking environment configuration...")
-    
-    env_file = Path(".env")
-    if not env_file.exists():
-        print("❌ .env file not found")
-        print("   Run: echo 'GOOGLE_API_KEY=your_key' > .env")
-        return False
-    
-    # Check if GOOGLE_API_KEY is set
-    from dotenv import load_dotenv
-    load_dotenv()
-    
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key or api_key == "your_google_api_key_here":
-        print("❌ GOOGLE_API_KEY not configured in .env")
-        print("   Get key from: https://aistudio.google.com/apikey")
-        return False
-    
-    print(f"✅ GOOGLE_API_KEY configured ({api_key[:10]}...)")
-    return True
+REPO_ROOT = Path(__file__).resolve().parents[2]
+CLIENT_ROOT = Path(__file__).resolve().parent
+SERVER_URL = os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8085/mcp")
 
-def check_dependencies():
-    """Check if required packages are installed"""
+
+def check_environment() -> bool:
+    print("🔍 Checking repository environment...")
+    from dotenv import load_dotenv
+
+    load_dotenv(REPO_ROOT / ".env")
+    configured = True
+    for name in ("OPENROUTER_API_KEY", "WEATHERAPI_KEY"):
+        if os.getenv(name):
+            print(f"✅ {name} configured")
+        else:
+            print(f"❌ {name} not configured in the repository-root .env")
+            configured = False
+    return configured
+
+
+def check_dependencies() -> bool:
     print("\n🔍 Checking dependencies...")
-    
-    required_packages = [
+    required_packages = (
         ("google.adk", "Google ADK"),
-        ("google.generativeai", "Google Generative AI"),
+        ("litellm", "LiteLLM"),
         ("mcp", "MCP"),
         ("fastmcp", "FastMCP"),
         ("dotenv", "python-dotenv"),
         ("httpx", "httpx"),
-    ]
-    
-    all_installed = True
-    for package, name in required_packages:
+    )
+    installed = True
+    for package, label in required_packages:
         try:
-            __import__(package)
-            print(f"✅ {name}")
+            importlib.import_module(package)
+            print(f"✅ {label}")
         except ImportError:
-            print(f"❌ {name} not installed")
-            all_installed = False
-    
-    if not all_installed:
-        print("\n   Install with: uv sync")
-        print("   Or: pip install google-adk google-generativeai mcp fastmcp python-dotenv httpx")
-    
-    return all_installed
+            print(f"❌ {label} not installed")
+            installed = False
+    return installed
 
-def check_agent_structure():
-    """Check if agent directory structure is correct"""
+
+def check_agent_structure() -> bool:
     print("\n🔍 Checking agent structure...")
-    
-    required_files = [
-        "weather_agent/agent.py",
-        "weather_agent/__init__.py",
-    ]
-    
-    all_exist = True
-    for file_path in required_files:
-        path = Path(file_path)
+    required_files = (
+        CLIENT_ROOT / "weather_agent" / "agent.py",
+        CLIENT_ROOT / "weather_agent" / "__init__.py",
+        CLIENT_ROOT / "verify_gate5_e2e.py",
+    )
+    valid = True
+    for path in required_files:
         if path.exists():
-            print(f"✅ {file_path}")
+            print(f"✅ {path.relative_to(REPO_ROOT)}")
         else:
-            print(f"❌ {file_path} not found")
-            all_exist = False
-    
-    return all_exist
+            print(f"❌ {path.relative_to(REPO_ROOT)} not found")
+            valid = False
+    return valid
 
-def check_mcp_server():
-    """Check if MCP server is accessible"""
-    print("\n🔍 Checking MCP server connectivity...")
-    
-    server_url = "https://weather-mcp-server-oze7nwnjba-as.a.run.app"
-    
-    try:
+
+def check_mcp_server() -> bool:
+    print("\n🔍 Checking local MCP server connectivity...")
+    server_url = os.getenv("MCP_SERVER_URL", SERVER_URL)
+
+    async def test_connection() -> int:
         import httpx
-        import asyncio
-        
-        async def test_connection():
-            async with httpx.AsyncClient() as client:
-                response = await client.get(server_url, timeout=10.0)
-                return response.status_code
-        
-        status_code = asyncio.run(test_connection())
-        
-        if status_code in [200, 404]:  # 404 is expected for GET on MCP endpoint
-            print(f"✅ MCP server reachable at {server_url}")
-            return True
-        else:
-            print(f"⚠️  MCP server returned status {status_code}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Cannot reach MCP server: {e}")
-        return False
 
-def check_agent_import():
-    """Try to import the agent"""
-    print("\n🔍 Checking agent import...")
-    
+        async with httpx.AsyncClient() as client:
+            response = await client.get(server_url, timeout=10.0)
+            return response.status_code
+
     try:
-        # Suppress warnings during import
-        import warnings
-        warnings.filterwarnings("ignore")
-        
-        from weather_agent import root_agent
-        print(f"✅ Agent imported successfully: {root_agent.name}")
-        print(f"   Model: {root_agent.model}")
-        return True
-    except Exception as e:
-        print(f"❌ Failed to import agent: {e}")
+        status_code = asyncio.run(test_connection())
+    except Exception:
+        print("❌ Cannot reach the local MCP server")
         return False
 
-def main():
-    """Run all verification checks"""
-    print("=" * 60)
-    print("Weather Agent Setup Verification")
-    print("=" * 60)
-    print()
-    
-    checks = [
+    if status_code in (200, 404, 405):
+        print(f"✅ MCP endpoint reachable at {server_url}")
+        return True
+    print(f"❌ MCP endpoint returned status {status_code}")
+    return False
+
+
+def check_agent_import() -> bool:
+    print("\n🔍 Checking agent import...")
+    sys.path.insert(0, str(CLIENT_ROOT))
+    try:
+        from weather_agent.agent import LITELLM_MODEL, root_agent
+
+        print(f"✅ Agent imported successfully: {root_agent.name}")
+        print(f"   MODEL={LITELLM_MODEL}")
+        return True
+    except Exception as exc:
+        print(f"❌ Failed to import agent: {type(exc).__name__}")
+        return False
+    finally:
+        sys.path.pop(0)
+
+
+def main() -> int:
+    checks = (
         check_environment(),
         check_dependencies(),
         check_agent_structure(),
         check_mcp_server(),
         check_agent_import(),
-    ]
-    
-    print("\n" + "=" * 60)
+    )
     if all(checks):
-        print("✅ All checks passed!")
-        print("\n🚀 Ready to start!")
-        print("   Run: ./start_agent.sh")
-        print("   Or:  uv run adk web")
-        print("\n📍 Then open: http://localhost:8000")
+        print("\n✅ All Gate 5 setup checks passed")
         return 0
-    else:
-        print("❌ Some checks failed")
-        print("\n⚠️  Fix the issues above and run this script again")
-        return 1
+    print("\n❌ Some Gate 5 setup checks failed")
+    return 1
+
 
 if __name__ == "__main__":
-    sys.exit(main())
-
+    raise SystemExit(main())
