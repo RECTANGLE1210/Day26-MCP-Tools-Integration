@@ -1,4 +1,4 @@
-# 01 — Function Calling thuần (Google Gemini SDK)
+# 01 — Function Calling thuần (OpenRouter)
 
 Tool `get_weather` được **định nghĩa schema thủ công** và **thực thi ngay trong app**.
 Model chỉ quyết định gọi tool nào — app mới là nơi chạy.
@@ -17,7 +17,7 @@ User hỏi  →  Model quyết định gọi get_weather(city="Hà Nội")
 
 ```bash
 pip install -r ../requirements.txt
-export GEMINI_API_KEY=...
+copy ..\.env.example ..\.env  # rồi điền OPENROUTER_API_KEY trong ..\.env
 python weather_function_calling.py
 ```
 
@@ -25,7 +25,7 @@ python weather_function_calling.py
 
 | File | Mô tả |
 |---|---|
-| `weather_function_calling.py` | Định nghĩa schema, thực thi tool, gọi model Gemini, xử lý vòng lặp function calling |
+| `weather_function_calling.py` | Định nghĩa schema OpenAI-compatible, thực thi tool, gọi OpenRouter, xử lý vòng lặp tool calling |
 
 ---
 
@@ -89,7 +89,7 @@ Bước 1 — App chuẩn bị "hộp công cụ" cho model
 Bước 2 — Gửi prompt + schema cho model
 ═══════════════════════════════════════
 
-    App ──────────────────────────────────────────▶ Gemini
+    App ──────────────────────────────────────────▶ OpenRouter
     │  "Thời tiết HN và ĐN?"                      │
     │  + schema get_weather                       │
     │                                             │
@@ -99,8 +99,8 @@ Bước 2 — Gửi prompt + schema cho model
 Bước 3 — Model TRẢ VỀ yêu cầu gọi tool (không tự chạy!)
 ═════════════════════════════════════════════════════════
 
-    Gemini ──────────────────────────────────────▶ App
-    │  function_calls:                             │
+    OpenRouter ──────────────────────────────────▶ App
+    │  tool_calls:                                  │
     │    [                                         │
     │      get_weather(city="Hà Nội"),             │
     │      get_weather(city="Đà Nẵng")             │
@@ -120,10 +120,10 @@ Bước 4 — App TỰ THI HÀNH hàm get_weather
 Bước 5 — Gửi kết quả lại cho model tổng hợp
 ════════════════════════════════════════════
 
-    App ──────────────────────────────────────────▶ Gemini
+    App ──────────────────────────────────────────▶ OpenRouter
     │  Kết quả: HN 29°C mưa, ĐN 30°C mây         │
     │                                            │
-    │  Gemini: "Hà Nội 29°C, mưa nhẹ 🌧️          │
+    │  Model: "Hà Nội 29°C, mưa nhẹ 🌧️            │
     │           nhớ mang ô nhé!                  │
     │           Đà Nẵng 30°C, nhiều mây 🌤️       │
     │           thời tiết dễ chịu!"              │
@@ -139,17 +139,18 @@ Bước 5 — Gửi kết quả lại cho model tổng hợp
 
 ```python
 # App phải TỰ MÔ TẢ tool cho model — viết tay, dễ sai
-get_weather_declaration = types.FunctionDeclaration(
-    name="get_weather",
-    description="Lấy thời tiết hiện tại của một thành phố",
-    parameters=types.Schema(
-        type=types.Type.OBJECT,
-        properties={
-            "city": types.Schema(type=types.Type.STRING, description="Tên thành phố")
+GET_WEATHER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_weather",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+            "additionalProperties": False,
         },
-        required=["city"],
-    ),
-)
+    },
+}
 ```
 
 **Phần 2 — Hàm thực thi** (app tự chạy khi model yêu cầu):
@@ -163,19 +164,24 @@ def get_weather(city: str) -> str:
 **Phần 3 — Vòng lặp** (nhận yêu cầu → chạy → trả lại):
 
 ```python
-while resp.function_calls:
-    for fc in resp.function_calls:
-        result = get_weather(**fc.args)   # ← APP chạy, không phải model
-    # gửi result lại cho model để tổng hợp câu trả lời
+while response.choices[0].message.tool_calls:
+    message = response.choices[0].message
+    messages.append(message.model_dump(exclude_none=True))
+    for tool_call in message.tool_calls:
+        args = json.loads(tool_call.function.arguments)
+        result = get_weather(**args)      # ← APP chạy, không phải model
+        messages.append({"role": "tool", "tool_call_id": tool_call.id,
+                         "content": result})
+    response = client.chat.completions.create(messages=messages, tools=TOOLS, ...)
 ```
 
 ---
 
 ## Luồng hoạt động
 
-1. App định nghĩa `FunctionDeclaration` với schema viết tay (tên, tham số, kiểu)
-2. App gửi prompt + danh sách tool tới Gemini
-3. Model trả về `function_calls` — yêu cầu gọi `get_weather`
+1. App định nghĩa schema tool OpenAI-compatible (tên, tham số, kiểu)
+2. App gửi prompt + danh sách tool tới OpenRouter
+3. Model trả về `tool_calls` — yêu cầu gọi `get_weather`
 4. App **tự chạy** hàm `get_weather()` và đưa kết quả trả lại model
 5. Model tổng hợp câu trả lời cuối cho user
 
@@ -184,7 +190,7 @@ while resp.function_calls:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  ❌ Schema viết tay                                         │
-│     FunctionDeclaration(name=..., parameters=...)           │
+│     {"type": "function", "function": {...}}               │
 │     → 15+ dòng boilerplate, dễ lệch với hàm thật            │
 │                                                             │
 │  ❌ Tool gắn chặt trong app                                 │
@@ -193,8 +199,7 @@ while resp.function_calls:
 │     → Sửa hàm ở A? Phải nhớ sửa cả B                        │
 │                                                             │
 │  ❌ Mỗi provider 1 format                                   │
-│     Google: FunctionDeclaration(...)                        │
-│     OpenAI: {"type": "function", "function": {...}}         │
+│     OpenAI-compatible: {"type": "function", ...}          │
 │     Anthropic: {"name": ..., "input_schema": {...}}         │
 │     → Đổi model = viết lại schema                           │
 └─────────────────────────────────────────────────────────────┘

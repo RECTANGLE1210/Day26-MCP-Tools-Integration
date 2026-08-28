@@ -1,49 +1,60 @@
-"""Minh hoạ FUNCTION CALLING thuần với Google Gemini SDK.
+"""Minh hoa FUNCTION CALLING thuan voi OpenRouter va OpenAI SDK.
 
-Tool `get_weather` được định nghĩa schema thủ công VÀ thực thi ngay trong
-chính file app này. Model chỉ QUYẾT ĐỊNH gọi tool nào; app mới là nơi chạy.
+Model chi yeu cau goi tool; ung dung Python moi la noi thuc thi ``get_weather``.
 
-Cách chạy:
+Cach chay:
     pip install -r ../requirements.txt
-    export GEMINI_API_KEY=...
+    tao file .env o root voi OPENROUTER_API_KEY
     python weather_function_calling.py
 """
 
-from google import genai
-from google.genai import types
+import json
+import os
+import sys
+from pathlib import Path
+from typing import Any
 
-client = genai.Client()
+from dotenv import load_dotenv
+from openai import OpenAI
 
-MODEL = "gemini-2.5-flash"
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(REPO_ROOT / ".env")
+
+DEFAULT_MODEL = "openai/gpt-4.1-mini"
+DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+MODEL = os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL)
+BASE_URL = os.getenv("OPENROUTER_BASE_URL", DEFAULT_BASE_URL)
+MAX_TOOL_ROUNDS = 8
 
 SYSTEM_INSTRUCTION = (
     "Bạn là trợ lý thời tiết thân thiện, trả lời bằng tiếng Việt tự nhiên. "
-    "Dùng emoji phù hợp (🌧️ 🌤️ 💨 💧). "
-    "Tóm tắt ngắn gọn, dễ hiểu, và đưa ra lời khuyên thực tế "
-    "(ví dụ: mang ô, mặc áo mỏng, ...)."
+    "Dùng emoji phù hợp (🌧️ 🌤️ 💨 💧). Tóm tắt ngắn gọn, dễ hiểu, "
+    "và đưa ra lời khuyên thực tế (ví dụ: mang ô, mặc áo mỏng)."
 )
 
-# 1. App tự định nghĩa schema của tool
-get_weather_declaration = types.FunctionDeclaration(
-    name="get_weather",
-    description="Lấy thời tiết hiện tại của một thành phố",
-    parameters=types.Schema(
-        type=types.Type.OBJECT,
-        properties={
-            "city": types.Schema(
-                type=types.Type.STRING, description="Tên thành phố"
-            )
+# 1. App tu dinh nghia schema cua tool theo format OpenAI-compatible.
+GET_WEATHER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_weather",
+        "description": "Lay thoi tiet hien tai cua mot thanh pho (du lieu mock).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "city": {"type": "string", "description": "Ten thanh pho"},
+            },
+            "required": ["city"],
+            "additionalProperties": False,
         },
-        required=["city"],
-    ),
-)
-
-TOOLS = [types.Tool(function_declarations=[get_weather_declaration])]
+    },
+}
+TOOLS = [GET_WEATHER_TOOL]
 
 
-# 2. App tự thực thi tool (trong thực tế sẽ gọi API thời tiết thật)
+# 2. App tu thuc thi tool; day van la mock data, khong phai Weather API that.
 def get_weather(city: str) -> str:
-    """Trả về thời tiết (mock) của *city*. Dùng làm tool cho model."""
+    """Tra ve thoi tiet mock cua *city*."""
     mock_data = {
         "Hà Nội": {
             "nhiệt_độ": "29°C",
@@ -64,60 +75,134 @@ def get_weather(city: str) -> str:
             "gió": {"hướng": "Đông", "tốc_độ": "10 km/h"},
         },
     }
-    import json
-
     default = {"nhiệt_độ": "28°C", "thời_tiết": "không có dữ liệu chi tiết"}
     return json.dumps({"city": city, **mock_data.get(city, default)}, ensure_ascii=False)
 
 
-def run(prompt: str) -> str:
-    """Gửi *prompt* tới Gemini, tự động xử lý function calling và trả về câu trả lời cuối."""
-    contents: list[types.Content] = [
-        types.Content(role="user", parts=[types.Part.from_text(text=prompt)])
+TOOL_HANDLERS = {"get_weather": get_weather}
+
+
+def create_client() -> OpenAI:
+    """Create the OpenRouter client only after validating the required key."""
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "Thiếu OPENROUTER_API_KEY. Hãy đặt biến này trong file .env ở root repository."
+        )
+    return OpenAI(api_key=api_key, base_url=os.getenv("OPENROUTER_BASE_URL", DEFAULT_BASE_URL))
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    """Convert SDK response objects to dictionaries for the next API request."""
+    if isinstance(value, dict):
+        return value
+    if hasattr(value, "model_dump"):
+        return value.model_dump(exclude_none=True)
+    if hasattr(value, "dict"):
+        return value.dict(exclude_none=True)
+    raise TypeError("OpenAI SDK response has an unsupported message format")
+
+
+def _tool_error(message: str) -> str:
+    return json.dumps({"error": message}, ensure_ascii=False)
+
+
+def _configure_output() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+
+
+def execute_tool(tool_call: Any) -> str:
+    """Dispatch only registered tools and return a deterministic tool result."""
+    name = tool_call.function.name
+    handler = TOOL_HANDLERS.get(name)
+    if handler is None:
+        return _tool_error(f"Tool không tồn tại: {name}")
+
+    raw_arguments = tool_call.function.arguments
+    try:
+        arguments = json.loads(raw_arguments)
+    except (TypeError, json.JSONDecodeError):
+        return _tool_error(f"Arguments không phải JSON hợp lệ cho tool {name}")
+
+    if (
+        not isinstance(arguments, dict)
+        or set(arguments) != {"city"}
+        or not isinstance(arguments["city"], str)
+    ):
+        return _tool_error("Arguments của get_weather phải có đúng một trường city kiểu string")
+
+    try:
+        return handler(**arguments)
+    except Exception as exc:
+        return _tool_error(f"Không thể thực thi tool {name}: {exc}")
+
+
+def run(prompt: str, client: OpenAI | None = None) -> str:
+    """Run the OpenAI-compatible tool-calling loop until a final answer is returned."""
+    _configure_output()
+    client = client or create_client()
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": SYSTEM_INSTRUCTION},
+        {"role": "user", "content": prompt},
     ]
 
-    # 3. Gọi model — model quyết định có gọi tool hay không
-    resp = client.models.generate_content(
-        model=MODEL,
-        contents=contents,
-        config=types.GenerateContentConfig(
+    for round_number in range(MAX_TOOL_ROUNDS + 1):
+        response = client.chat.completions.create(
+            model=os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL),
+            messages=messages,
             tools=TOOLS,
-            system_instruction=SYSTEM_INSTRUCTION,
-        ),
-    )
+        )
+        if not getattr(response, "choices", None):
+            raise RuntimeError("OpenRouter không trả về lựa chọn nào")
 
-    # 4. Vòng lặp: nếu model yêu cầu tool, app TỰ THỰC THI rồi đưa kết quả trả lại
-    while resp.function_calls:
-        # Thêm phản hồi của model vào lịch sử hội thoại
-        contents.append(resp.candidates[0].content)
+        message = response.choices[0].message
+        tool_calls = getattr(message, "tool_calls", None) or []
+        if not tool_calls:
+            return getattr(message, "content", None) or "Model không trả về nội dung cuối."
 
-        function_responses = []
-        for fc in resp.function_calls:
-            print(f"  [model yêu cầu] {fc.name}({fc.args})")
-            result = get_weather(**fc.args)  # <-- app chạy, không phải model
+        if round_number >= MAX_TOOL_ROUNDS:
+            raise RuntimeError(f"Vượt quá giới hạn {MAX_TOOL_ROUNDS} vòng gọi tool")
+
+        # Giữ assistant tool_calls trong conversation trước khi thêm tool results.
+        messages.append(_as_dict(message))
+        for tool_call in tool_calls:
+            name = tool_call.function.name
+            arguments = tool_call.function.arguments
+            print(f"  [model yêu cầu] {name}({arguments})")
+            result = execute_tool(tool_call)
             print(f"  [app thực thi]  -> {result}")
-            function_responses.append(
-                types.Part.from_function_response(
-                    name=fc.name, response={"result": result}
-                )
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": result,
+                }
             )
 
-        # Gửi kết quả tool trả về cho model
-        contents.append(types.Content(role="user", parts=function_responses))
-        resp = client.models.generate_content(
-            model=MODEL,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                tools=TOOLS,
-                system_instruction=SYSTEM_INSTRUCTION,
-            ),
-        )
+    raise RuntimeError("Function calling loop kết thúc bất thường")
 
-    # 5. Model tổng hợp câu trả lời cuối
-    return resp.text
+
+def main() -> int:
+    _configure_output()
+    question = "Thời tiết Hà Nội và Đà Nẵng hôm nay thế nào?"
+    try:
+        client = create_client()
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(f"User: {question}\n")
+    try:
+        print("Trả lời:", run(question, client=client))
+    except Exception as exc:
+        api_key = os.getenv("OPENROUTER_API_KEY") or ""
+        message = str(exc).replace(api_key, "[redacted]") if api_key else str(exc)
+        print(f"Lỗi khi gọi OpenRouter: {message}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    question = "Thời tiết Hà Nội và Đà Nẵng hôm nay thế nào?"
-    print(f"User: {question}\n")
-    print("Trả lời:", run(question))
+    raise SystemExit(main())

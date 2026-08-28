@@ -9,7 +9,7 @@ day26-mcp/
 ├── README.md                ← Bạn đang đọc file này
 ├── requirements.txt         ← pip install -r requirements.txt
 │
-├── 01-function-calling/     ← Bước 1: Function Calling thuần (Gemini SDK)
+├── 01-function-calling/     ← Bước 1: Function Calling thuần (OpenRouter)
 │   ├── README.md
 │   └── weather_function_calling.py
 │
@@ -36,9 +36,9 @@ pip install -r requirements.txt
 # MCP demo (không cần API key)
 cd 02-mcp-basics && python weather_client.py
 
-# Function Calling (cần Gemini API key)
-export GEMINI_API_KEY=...
-cd 01-function-calling && python weather_function_calling.py
+# Function Calling (cần OpenRouter API key)
+copy .env.example .env  # rồi điền OPENROUTER_API_KEY trong .env
+python 01-function-calling/weather_function_calling.py
 
 # Production — Auth (2 terminal)
 cd 03-production
@@ -48,6 +48,22 @@ python auth_client.py              # terminal 2
 # Production — Tool Registry
 cd 03-production && python registry_client.py
 ```
+
+---
+
+## Luồng Gate 1
+
+```text
+OpenRouter
+    ↓ OpenAI-compatible API
+LLM
+    ↓ tool_calls
+Python application
+    ↓ executes get_weather()
+LLM receives tool result
+```
+
+Model chỉ yêu cầu gọi function; model không tự thực thi Python function.
 
 ---
 
@@ -99,7 +115,7 @@ LLM tổng hợp câu trả lời
 
 Cùng một tool `get_weather`, dưới đây là hai cách triển khai để thấy rõ sự khác biệt.
 
-### [Cách 1 — Function Calling thuần (Google Gemini SDK)](01-function-calling/)
+### [Cách 1 — Function Calling thuần (OpenRouter)](01-function-calling/)
 
 Tool được **định nghĩa và thực thi ngay trong app**. Model chỉ quyết định gọi tool nào, app tự chạy và đưa kết quả trở lại.
 
