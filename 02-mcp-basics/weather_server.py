@@ -15,9 +15,9 @@ Chạy trực tiếp:
     claude mcp add weather -- python /đường/dẫn/tới/weather_server.py
 """
 
-from mcp.server.mcpserver import MCPServer
+from mcp.server.fastmcp import FastMCP
 
-mcp = MCPServer("weather")
+mcp = FastMCP("weather")
 
 _MOCK_DB = {
     "Hanoi": "29°C, trời mưa",

@@ -50,25 +50,19 @@ copy .env.example .env
 python 04-lab/mcp-server/weather.py
 ```
 
-### 3. Install Dependencies
-
-```bash
-uv sync
-```
-
-### 4. Verify the Gate 5 flow
+### 3. Verify the Gate 5 flow
 
 ```bash
 python 04-lab/mcp-client/verify_gate5_e2e.py
 ```
 
-### 5. Run the Agent
+### 4. Run the Agent
 
 ```bash
 uv run adk web
 ```
 
-### 6. Use the Agent
+### 5. Use the Agent
 
 1. Open browser: http://localhost:8000
 2. Select `weather_agent` from dropdown
@@ -84,9 +78,10 @@ mcp-client/
 │   ├── agent.py           # Main agent with MCP connection
 │   └── __init__.py
 ├── pyproject.toml
-├── .env                   # Environment variables (create this)
 └── README.md
 ```
+
+The environment file is kept at the repository root (`../../.env`).
 
 ## Configuration
 
@@ -118,7 +113,8 @@ root_agent = Agent(
    - Check `MCP_SERVER_URL` in `agent.py`
 
 2. **405 errors**: Port conflict with another application
-   - Check what's running on the port: `lsof -i :8085`
+   - On Windows: `netstat -ano | findstr :8085`
+   - On macOS/Linux: `lsof -i :8085`
    - Change port in both server and client if needed
 
 3. **Timeout errors**: Server not started

@@ -1,9 +1,16 @@
-from typing import Any
 import logging
-import re
-import httpx
 import os
+import re
+from pathlib import Path
+from typing import Any
+
+import httpx
+from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+
+# Load the repository-root configuration for every launch mode.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(REPO_ROOT / ".env", override=False)
 
 # Initialize FastMCP server
 port = int(os.getenv("PORT", 8085))
@@ -158,20 +165,11 @@ UV Index: {day_data['uv']}
 @mcp.tool()
 async def health_check() -> str:
     """Health check endpoint for deployment verification."""
-    return "✅ Weather MCP Server is running! Ready to provide weather data for Australian cities and worldwide."
+    return "✅ Weather MCP Server is running! Ready to provide weather data worldwide."
 
 print("✅ MCP server initialized with Streamable HTTP transport")
 print("🔧 Available tools: get_current_weather, get_forecast, health_check")
 
 if __name__ == "__main__":
-    import sys
-    
-    is_cloud_run = bool(os.getenv("PORT"))
-    is_standalone = len(sys.argv) == 1 and sys.stdin.isatty()
-    
-    if is_cloud_run or is_standalone:
-        print(f"🚀 Starting MCP server on http://0.0.0.0:{port}/mcp")
-        mcp.run(transport="streamable-http")
-    else:
-        print("Starting FastMCP server in stdio mode for local client", file=sys.stderr)
-        mcp.run()
+    print(f"🚀 Starting Weather MCP server on http://127.0.0.1:{port}/mcp")
+    mcp.run(transport="streamable-http")

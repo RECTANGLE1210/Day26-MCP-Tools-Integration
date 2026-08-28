@@ -31,6 +31,7 @@ async def main() -> None:
         async with streamable_http_client(SERVER_URL, http_client=http_client) as (
             read,
             write,
+            _,
         ):
             async with ClientSession(read, write) as session:
                 await session.initialize()

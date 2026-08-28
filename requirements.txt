@@ -1,5 +1,7 @@
 openai>=1.0.0
 python-dotenv>=1.0.0
-mcp[cli]>=1.2.0
+mcp[cli]>=1.29,<2
+google-adk>=2.8,<3
+litellm>=1.84
 httpx>=0.28.0
 uvicorn>=0.34.0

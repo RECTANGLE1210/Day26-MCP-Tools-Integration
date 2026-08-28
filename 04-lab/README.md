@@ -1,13 +1,13 @@
-# Lab 04 — Weather Agent with Remote MCP Server
+# Lab 04 — OpenRouter ADK Agent with Local Weather MCP Server
 
-A weather agent built with Google ADK that connects to an MCP server via Streamable HTTP transport.
+A weather agent built with Google ADK and LiteLLM/OpenRouter that connects to a local MCP server via Streamable HTTP transport.
 
 ## Architecture
 
 ```
 ┌─────────────────┐   Streamable HTTP    ┌─────────────────┐      REST       ┌─────────────────┐
 │   ADK Agent     │ ──────────────────── │   MCP Server    │ ─────────────── │  WeatherAPI.com │
-│  (mcp-client)   │   localhost:8085/mcp │  (mcp-server)   │                 │                 │
+│  (mcp-client)   │   127.0.0.1:8085/mcp │  (mcp-server)   │                 │                 │
 └─────────────────┘                      └─────────────────┘                 └─────────────────┘
 ```
 
@@ -32,13 +32,13 @@ ADK (Agent Development Kit) đóng vai trò **MCP Client**
 │     McpToolset → tự hỏi server "anh có tool gì?"                │
 │     → nhận về: get_current_weather, get_forecast, health_check  │
 │                                                                 │
-│  3. TRUYỀN tools cho LLM (Gemini)                               │
-│     Agent(model="gemini-2.5-flash", tools=[weather_tools])      │
-│     → Gemini biết nó có thể gọi 3 tools trên                    │
+│  3. TRUYỀN tools cho LLM (OpenRouter qua LiteLLM)                │
+│     Agent(model="openrouter/openai/gpt-4.1-mini", ...)          │
+│     → Model biết nó có thể gọi 3 tools trên                      │
 │                                                                 │
 │  4. ĐIỀU PHỐI vòng lặp Function Calling                         │
-│     User hỏi → Gemini chọn tool → ADK gọi MCP Server            │
-│     → nhận kết quả → đưa lại cho Gemini tổng hợp                │
+│     User hỏi → LLM chọn tool → ADK gọi MCP Server                │
+│     → nhận kết quả → đưa lại cho LLM tổng hợp                    │
 │                                                                 │
 │  5. CUNG CẤP giao diện web (adk web)                            │
 │     → http://localhost:8000 để chat với agent                   │
@@ -50,32 +50,33 @@ So với bài 02 (viết client thủ công bằng `mcp.ClientSession`), ADK gi�
 
 ## Setup
 
-### 1. MCP Server
+### 1. Configure the repository environment
 
 ```bash
-cd mcp-server
-uv sync
-
-# Set your WeatherAPI key (get one free at https://weatherapi.com)
-export WEATHERAPI_KEY="your_weatherapi_key"
-
-# Start the server (runs on port 8085 by default)
-uv run python weather.py
+cd ../..
+copy .env.example .env
+# Điền OPENROUTER_API_KEY và WEATHERAPI_KEY trong .env ở root
 ```
 
-The server will be available at `http://localhost:8085/mcp`.
+### 2. MCP Server
 
-### 2. ADK Agent (Client)
+```bash
+python 04-lab/mcp-server/weather.py
+```
+
+The server will be available at `http://127.0.0.1:8085/mcp`.
+
+### 3. Verify the Gate 5 flow
+
+```bash
+python 04-lab/mcp-client/verify_gate5_e2e.py
+```
+
+### 4. ADK Agent (Client)
 
 ```bash
 cd mcp-client
-uv sync
-
-# Create .env file with your Gemini API key
-echo "GOOGLE_API_KEY=your_gemini_api_key" > .env
-
-# Start ADK web interface
-uv run adk web
+adk web
 ```
 
 Open http://localhost:8000 in your browser, select `weather_agent`, and ask about the weather.
@@ -84,6 +85,8 @@ Open http://localhost:8000 in your browser, select `weather_agent`, and ask abou
 
 | Variable | Where | Description |
 |----------|-------|-------------|
-| `WEATHERAPI_KEY` | mcp-server | API key from weatherapi.com |
-| `GOOGLE_API_KEY` | mcp-client/.env | Gemini API key |
-| `PORT` | mcp-server (env) | Override server port (default: 8085) |
+| `OPENROUTER_API_KEY` | root `.env` | OpenRouter API key |
+| `OPENROUTER_MODEL` | root `.env` | Optional model; default `openai/gpt-4.1-mini` |
+| `WEATHERAPI_KEY` | root `.env` | API key from weatherapi.com |
+| `MCP_SERVER_URL` | root `.env` | Optional MCP URL; default `http://127.0.0.1:8085/mcp` |
+| `PORT` | root environment | Optional server port override; default `8085` |

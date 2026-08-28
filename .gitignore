@@ -7,3 +7,4 @@ venv/
 .adk/
 *.db
 **/.DS_Store
+*.egg-info/

@@ -18,36 +18,64 @@ day26-mcp/
 │   ├── weather_server.py
 │   └── weather_client.py
 │
-└── 03-production/           ← Bước 3: Auth, Tool Registry, Versioning
-    ├── README.md
-    ├── auth_server.py
-    ├── auth_client.py
-    ├── registry.json
-    ├── registry_client.py
-    └── versioned_server.py
+├── 03-production/           ← Bước 3: Auth, Tool Registry, Versioning
+│   ├── README.md
+│   ├── auth_server.py
+│   ├── auth_client.py
+│   ├── registry.json
+│   ├── registry_client.py
+│   └── versioned_server.py
+
+├── 04-lab/                  ← Bước 4/5: Weather MCP + ADK/OpenRouter agent
+│   ├── mcp-server/
+│   └── mcp-client/
+│
+└── scripts/verify_all.py    ← Full Gate 1–5 regression runner
 ```
 
 ## Quick start
 
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+Windows (canonical root `.venv`):
 
+```bat
+py -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+copy .env.example .env
+```
+
+macOS/Linux:
+
+```bash
+python -m venv .venv
+./.venv/bin/python -m pip install -r requirements.txt
+cp .env.example .env
+```
+
+Điền `OPENROUTER_API_KEY` và `WEATHERAPI_KEY` trong `.env` ở root, sau đó dùng
+`.venv\Scripts\python.exe` (Windows) hoặc `./.venv/bin/python` (macOS/Linux):
+
+```bash
 # MCP demo (không cần API key)
-cd 02-mcp-basics && python weather_client.py
+python 02-mcp-basics/weather_client.py
 
 # Function Calling (cần OpenRouter API key)
-copy .env.example .env  # rồi điền OPENROUTER_API_KEY trong .env
 python 01-function-calling/weather_function_calling.py
 
 # Production — Auth (2 terminal)
-cd 03-production
-python auth_server.py              # terminal 1
-python auth_client.py              # terminal 2
+python 03-production/auth_server.py # terminal 1
+python 03-production/auth_client.py # terminal 2
 
 # Production — Tool Registry
-cd 03-production && python registry_client.py
+python 03-production/registry_client.py
+
+# Local Weather MCP + ADK/OpenRouter agent (server terminal 1)
+python 04-lab/mcp-server/weather.py
+python 04-lab/mcp-client/verify_gate5_e2e.py  # terminal 2
+
+# Full regression
+python scripts/verify_all.py
 ```
+
 
 ---
 
