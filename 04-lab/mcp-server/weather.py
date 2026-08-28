@@ -1,5 +1,6 @@
 from typing import Any
-import asyncio
+import logging
+import re
 import httpx
 import os
 from mcp.server.fastmcp import FastMCP
@@ -14,36 +15,60 @@ USER_AGENT = "weather-app/1.0"
 
 # Get API key from environment variable
 API_KEY = os.getenv("WEATHERAPI_KEY")
+LOGGER = logging.getLogger(__name__)
+_QUERY_KEY_PATTERN = re.compile(r"([?&]key=|\bkey=)[^&#\s\"']+", re.IGNORECASE)
+
+# httpx/httpcore log complete request URLs at INFO, which would expose the query key.
+for logger_name in ("httpx", "httpcore"):
+    logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+
+def redact_secrets(text: str) -> str:
+    """Remove the configured key and any URL query-string key value from text."""
+    redacted = text.replace(API_KEY, "***REDACTED***") if API_KEY else text
+    return _QUERY_KEY_PATTERN.sub(r"\1***REDACTED***", redacted)
 
 async def make_weather_request(endpoint: str, params: dict[str, str]) -> dict[str, Any] | None:
     """Make a request to the WeatherAPI with proper error handling."""
     # Check if API key is set
     if not API_KEY:
-        print("ERROR: WeatherAPI key not set. Please set WEATHERAPI_KEY environment variable.")
+        LOGGER.error("WeatherAPI key is not configured")
         return None
         
     headers = {
         "User-Agent": USER_AGENT,
     }
     # Add API key to parameters
-    params["key"] = API_KEY
+    request_params = {**params, "key": API_KEY}
     
     url = f"{WEATHERAPI_BASE}/{endpoint}"
     
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(url, headers=headers, params=params, timeout=30.0)
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, params=request_params, timeout=30.0)
             response.raise_for_status()
             return response.json()
-        except httpx.HTTPStatusError as e:
-            print(f"HTTP Error {e.response.status_code}: {e.response.text}")
-            return None
-        except httpx.RequestError as e:
-            print(f"Request Error: {e}")
-            return None
-        except Exception as e:
-            print(f"Unexpected error: {e}")
-            return None
+    except httpx.HTTPStatusError as exc:
+        LOGGER.error(
+            "WeatherAPI %s request failed: HTTP %s",
+            endpoint,
+            exc.response.status_code,
+        )
+        return None
+    except httpx.RequestError as exc:
+        LOGGER.error(
+            "WeatherAPI %s request failed: %s",
+            endpoint,
+            redact_secrets(str(exc)),
+        )
+        return None
+    except Exception as exc:
+        LOGGER.error(
+            "Unexpected WeatherAPI error for %s: %s",
+            endpoint,
+            redact_secrets(str(exc)),
+        )
+        return None
 
 @mcp.tool()
 async def get_current_weather(city: str) -> str:
